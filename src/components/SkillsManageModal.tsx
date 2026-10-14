@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DbUser, StaffSkill } from '../types/database';
 import { itdDb, ALL_STAFF_SKILLS } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 
 interface SkillsManageModalProps {
   isOpen: boolean;
@@ -92,18 +93,21 @@ export const SkillsManageModal: React.FC<SkillsManageModalProps> = ({
   const targetUser = itdDb.getUserById(selectedUserId) || currentUser;
   const userSkills = targetUser.skills || [];
 
-  const handleToggle = (skill: StaffSkill) => {
-    itdDb.toggleUserSkill(targetUser.id, skill);
+  const handleToggle = async (skill: StaffSkill) => {
+    const updated = userSkills.includes(skill)
+      ? userSkills.filter((s) => s !== skill)
+      : [...userSkills, skill];
+    await supabaseService.setUserSkills(targetUser.id, updated);
     onUserUpdated();
   };
 
-  const handleGrantAll = () => {
-    itdDb.setUserSkills(targetUser.id, [...ALL_STAFF_SKILLS]);
+  const handleGrantAll = async () => {
+    await supabaseService.setUserSkills(targetUser.id, [...ALL_STAFF_SKILLS]);
     onUserUpdated();
   };
 
-  const handleRevokeAll = () => {
-    itdDb.setUserSkills(targetUser.id, []);
+  const handleRevokeAll = async () => {
+    await supabaseService.setUserSkills(targetUser.id, []);
     onUserUpdated();
   };
 

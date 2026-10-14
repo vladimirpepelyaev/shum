@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Heart, UserPlus, MessageCircle, Sparkles } from 'lucide-react';
 import { DbUser, DbNotification } from '../types/database';
 import { Avatar } from './Avatar';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 
 interface NotificationsViewProps {
   currentUser: DbUser | null;
@@ -15,6 +16,33 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
   onNavigateToProfile,
   onNavigateToPost,
 }) => {
+  const [notifications, setNotifications] = useState<Array<DbNotification & { sender?: DbUser }>>([]);
+  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
+
+  const loadNotifications = async () => {
+    if (!currentUser) return;
+    try {
+      const list = await supabaseService.getNotifications(currentUser.id);
+      setNotifications(list);
+
+      // Check following status for senders
+      const senderIds = list.map((n) => n.sender_id).filter(Boolean);
+      const map: Record<string, boolean> = {};
+      await Promise.all(
+        senderIds.map(async (sid) => {
+          map[sid] = await supabaseService.isFollowing(currentUser.id, sid);
+        })
+      );
+      setFollowingMap(map);
+    } catch {
+      setNotifications(itdDb.getNotifications(currentUser.id));
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, [currentUser]);
+
   if (!currentUser) {
     return (
       <div className="bg-[#1c1c20] border border-neutral-800 rounded-3xl p-8 text-center text-neutral-400 text-sm">
@@ -22,8 +50,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
       </div>
     );
   }
-
-  const notifications = itdDb.getNotifications(currentUser.id);
 
   const formatDate = (isoString: string): string => {
     try {
@@ -38,8 +64,9 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
     }
   };
 
-  const handleFollowBack = (sender: DbUser) => {
-    itdDb.toggleFollow(currentUser.id, sender.id);
+  const handleFollowBack = async (sender: DbUser) => {
+    await supabaseService.toggleFollow(currentUser.id, sender.id);
+    await loadNotifications();
   };
 
   const handleNotificationClick = (notif: DbNotification & { sender?: DbUser }) => {
@@ -74,10 +101,10 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {notifications.map((notif) => {
+          {notifications.map((notif: DbNotification & { sender?: DbUser }) => {
             const isFollower = notif.type === 'follow' && notif.sender;
             const isFollowingSender = notif.sender
-              ? itdDb.isFollowing(currentUser.id, notif.sender.id)
+              ? Boolean(followingMap[notif.sender.id])
               : false;
 
             return (

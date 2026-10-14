@@ -5,11 +5,9 @@ import {
   User,
   LogOut,
   Archive,
-  Database,
   HelpCircle,
   LifeBuoy,
-  ShieldAlert,
-  Sliders
+  ShieldAlert
 } from 'lucide-react';
 import { DbUser } from '../types/database';
 import { itdDb } from '../lib/storage';
@@ -19,8 +17,6 @@ interface SidebarProps {
   currentUser: DbUser | null;
   onNavigate: (path: string) => void;
   onOpenAuth: () => void;
-  onOpenSchemaModal?: () => void;
-  onOpenSkillsModal?: () => void;
   onLogout?: () => void;
   unreadCount?: number;
   unreadSupportCount?: number;
@@ -34,8 +30,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onNavigate,
   onOpenAuth,
-  onOpenSchemaModal,
-  onOpenSkillsModal,
   onLogout,
   unreadCount = 0,
   unreadSupportCount = 0,
@@ -256,30 +250,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <User className="w-4 h-4" />
             <span>Профиль</span>
           </button>
-
-          {/* Управление скиллами сотрудника (быстрый доступ для тестов/админа) */}
-          {onOpenSkillsModal && (
-            <button
-              type="button"
-              onClick={onOpenSkillsModal}
-              className="w-full flex items-center space-x-3.5 px-4 py-2.5 rounded-2xl font-medium text-sm text-neutral-400 hover:text-white hover:bg-neutral-900/60 transition"
-            >
-              <Sliders className="w-4 h-4 text-neutral-400" />
-              <span>Скиллы ({currentUser?.skills?.length || 0})</span>
-            </button>
-          )}
-
-          {/* Структура БД */}
-          {onOpenSchemaModal && (
-            <button
-              type="button"
-              onClick={onOpenSchemaModal}
-              className="w-full flex items-center space-x-3.5 px-4 py-2.5 rounded-2xl font-medium text-sm text-neutral-400 hover:text-white hover:bg-neutral-900/60 transition"
-            >
-              <Database className="w-4 h-4 text-neutral-400" />
-              <span>Структура БД</span>
-            </button>
-          )}
         </nav>
       </div>
 

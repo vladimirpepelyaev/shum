@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { DbUser, DbReport, PostWithMeta, DbModerationDecision } from '../types/database';
 import { itdDb, getImageFingerprint } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { Avatar } from './Avatar';
 
 interface ModerationCrmViewProps {
@@ -52,27 +53,41 @@ export const ModerationCrmView: React.FC<ModerationCrmViewProps> = ({
   const [decisionFilter, setDecisionFilter] = useState<'all' | 'accepted' | 'dismissed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const loadData = () => {
-    const list = itdDb.getAllReports();
-    setReports(list);
+  const loadData = async () => {
+    try {
+      const list = await supabaseService.getAllReports();
+      setReports(list);
 
-    const initialReasons: { [reportId: string]: string } = {};
-    list.forEach((r) => {
-      initialReasons[r.id] = r.reason || MODERATION_REASONS[0];
-    });
-    setCustomReasons((prev) => ({ ...initialReasons, ...prev }));
+      const initialReasons: { [reportId: string]: string } = {};
+      list.forEach((r) => {
+        initialReasons[r.id] = r.reason || MODERATION_REASONS[0];
+      });
+      setCustomReasons((prev) => ({ ...initialReasons, ...prev }));
 
-    const history = itdDb.getModerationDecisions();
-    setDecisions(history);
+      const history = await supabaseService.getModerationDecisions();
+      setDecisions(history);
+    } catch {
+      const list = itdDb.getAllReports();
+      setReports(list);
+
+      const initialReasons: { [reportId: string]: string } = {};
+      list.forEach((r) => {
+        initialReasons[r.id] = r.reason || MODERATION_REASONS[0];
+      });
+      setCustomReasons((prev) => ({ ...initialReasons, ...prev }));
+
+      const history = itdDb.getModerationDecisions();
+      setDecisions(history);
+    }
   };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const handleAcceptReport = (reportId: string, authorName: string, authorUsername: string) => {
+  const handleAcceptReport = async (reportId: string, authorName: string, authorUsername: string) => {
     const chosenReason = customReasons[reportId] || 'Нарушение правил сообщества';
-    itdDb.acceptReport(reportId, chosenReason, {
+    await supabaseService.acceptReport(reportId, chosenReason, {
       id: currentUser.id,
       name: currentUser.name,
       username: currentUser.username,
@@ -81,18 +96,18 @@ export const ModerationCrmView: React.FC<ModerationCrmViewProps> = ({
       `Публикация удалена. Профиль @${authorUsername} (${authorName}) заблокирован: «${chosenReason}». Решение занесено в историю.`
     );
     setTimeout(() => setFeedbackMessage(null), 3500);
-    loadData();
+    await loadData();
   };
 
-  const handleDismissReport = (reportId: string) => {
-    itdDb.dismissReport(reportId, {
+  const handleDismissReport = async (reportId: string) => {
+    await supabaseService.dismissReport(reportId, {
       id: currentUser.id,
       name: currentUser.name,
       username: currentUser.username,
     });
     setFeedbackMessage('Жалоба отклонена и занесена в историю решений.');
     setTimeout(() => setFeedbackMessage(null), 3000);
-    loadData();
+    await loadData();
   };
 
   const handleReasonChange = (reportId: string, newReason: string) => {

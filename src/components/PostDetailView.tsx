@@ -18,6 +18,8 @@ import { itdDb, getImageFingerprint } from '../lib/storage';
 import { IosEmojiPicker } from './IosEmojiPicker';
 import { showAppToast } from '../lib/toast';
 
+import { supabaseService } from '../lib/supabaseService';
+
 interface PostDetailViewProps {
   username: string;
   postNumber: number;
@@ -42,17 +44,31 @@ export const PostDetailView: React.FC<PostDetailViewProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedKid, setCopiedKid] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const hasNoSpamSkill = currentUser?.skills?.includes('no_spam') || false;
 
-  const loadPostAndComments = () => {
-    const foundPost = itdDb.getPostByUsernameAndNumber(username, postNumber);
-    if (foundPost) {
-      setPost(foundPost);
-      const postComments = itdDb.getCommentsForPost(foundPost.id);
-      setComments(postComments);
-    } else {
-      setPost(null);
+  const loadPostAndComments = async () => {
+    setIsLoading(true);
+    try {
+      const foundPost = await supabaseService.getPostByUsernameAndNumber(username, postNumber, currentUser?.id);
+      if (foundPost) {
+        setPost(foundPost);
+        const postComments = await supabaseService.getCommentsForPost(foundPost.id);
+        setComments(postComments);
+      } else {
+        setPost(null);
+      }
+    } catch {
+      const foundPost = itdDb.getPostByUsernameAndNumber(username, postNumber);
+      if (foundPost) {
+        setPost(foundPost);
+        setComments(itdDb.getCommentsForPost(foundPost.id));
+      } else {
+        setPost(null);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -60,24 +76,25 @@ export const PostDetailView: React.FC<PostDetailViewProps> = ({
     loadPostAndComments();
   }, [username, postNumber, currentUser]);
 
-  const handleLike = () => {
+  const handleLike = async () => {
     if (!currentUser || !post) return;
-    itdDb.toggleLike(post.id, currentUser.id);
-    loadPostAndComments();
+    await supabaseService.toggleLike(post.id, currentUser.id);
+    await loadPostAndComments();
   };
 
-  const handleAddComment = (e: React.FormEvent) => {
+  const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !post || !commentText.trim()) return;
 
-    itdDb.addComment({
+    const text = commentText.trim();
+    setCommentText('');
+    await supabaseService.addComment({
       postId: post.id,
       userId: currentUser.id,
-      content: commentText.trim(),
+      content: text,
     });
 
-    setCommentText('');
-    loadPostAndComments();
+    await loadPostAndComments();
   };
 
   const handleCopyLink = () => {
@@ -93,13 +110,13 @@ export const PostDetailView: React.FC<PostDetailViewProps> = ({
   const userSkills = userFresh?.skills || [];
   const hasDeleteSkill = userSkills.includes('delete_content') || userSkills.includes('moderation');
 
-  const handleDeletePost = () => {
+  const handleDeletePost = async () => {
     if (!currentUser || !post) return;
     const isOwner = currentUser.id === post.user_id;
     if (!isOwner && !hasDeleteSkill) return;
 
     try {
-      itdDb.deletePost(post.id, currentUser.id);
+      await supabaseService.deletePost(post.id, currentUser.id);
       showAppToast('Публикация удалена', 'Пост успешно удалён из ленты и стены', 'info');
       onBack();
     } catch (err: any) {

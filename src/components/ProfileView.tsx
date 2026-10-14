@@ -24,6 +24,7 @@ import { PostCard } from './PostCard';
 import { Composer } from './Composer';
 import { EmojiAvatarPickerModal } from './EmojiAvatarPickerModal';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { showAppToast } from '../lib/toast';
 
 interface ProfileViewProps {
@@ -70,37 +71,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const canViewUserCard = currentUser?.skills?.includes('user_card') || false;
   const canVerify = currentUser?.skills?.includes('verification') || false;
 
-  const loadProfileData = () => {
-    const user = itdDb.getUserByUsername(username);
-    if (!user) {
-      setProfileUser(null);
-      return;
-    }
+  const loadProfileData = async () => {
+    try {
+      const user = await supabaseService.getUserByUsername(username);
+      if (!user) {
+        setProfileUser(null);
+        return;
+      }
 
-    setProfileUser(user);
-    setNameInput(user.name);
-    setBioInput(user.bio || '');
-    setAvatarInput(user.avatar_url || '');
-    setEmojiInput(user.avatar_emoji || null);
+      setProfileUser(user);
+      setNameInput(user.name);
+      setBioInput(user.bio || '');
+      setAvatarInput(user.avatar_url || '');
+      setEmojiInput(user.avatar_emoji || null);
 
-    const userPosts = itdDb.getUserPosts(user.id);
-    const sorted = [...userPosts].sort((a, b) => {
-      if (a.is_pinned && !b.is_pinned) return -1;
-      if (!a.is_pinned && b.is_pinned) return 1;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-    setPosts(sorted);
+      const [userPosts, userLiked, userFollowers, userFollowing] = await Promise.all([
+        supabaseService.getUserPosts(user.id, currentUser?.id),
+        supabaseService.getUserLikedPosts(user.id, currentUser?.id),
+        supabaseService.getFollowers(user.id),
+        supabaseService.getFollowing(user.id),
+      ]);
 
-    const userLiked = itdDb.getUserLikedPosts(user.id);
-    setLikedPosts(userLiked);
+      const sorted = [...userPosts].sort((a, b) => {
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      setPosts(sorted);
+      setLikedPosts(userLiked);
+      setFollowers(userFollowers);
+      setFollowing(userFollowing);
 
-    const userFollowers = itdDb.getFollowers(user.id);
-    const userFollowing = itdDb.getFollowing(user.id);
-    setFollowers(userFollowers);
-    setFollowing(userFollowing);
-
-    if (currentUser) {
-      setIsFollowing(itdDb.isFollowing(currentUser.id, user.id));
+      if (currentUser) {
+        const isFoll = await supabaseService.isFollowing(currentUser.id, user.id);
+        setIsFollowing(isFoll);
+      }
+    } catch {
+      const user = itdDb.getUserByUsername(username);
+      if (!user) {
+        setProfileUser(null);
+        return;
+      }
+      setProfileUser(user);
+      setPosts(itdDb.getUserPosts(user.id));
+      setLikedPosts(itdDb.getUserLikedPosts(user.id));
+      setFollowers(itdDb.getFollowers(user.id));
+      setFollowing(itdDb.getFollowing(user.id));
+      if (currentUser) {
+        setIsFollowing(itdDb.isFollowing(currentUser.id, user.id));
+      }
     }
   };
 
@@ -128,44 +147,44 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       if (event.target?.result && profileUser) {
         const url = event.target.result as string;
         setAvatarInput(url);
-        itdDb.updateUser(profileUser.id, { avatar_url: url, avatar_emoji: null });
-        loadProfileData();
+        await supabaseService.updateProfile(profileUser.id, { avatar_url: url, avatar_emoji: null });
+        await loadProfileData();
         onUserUpdated();
       }
     };
     reader.readAsDataURL(file);
   };
 
-  const handleSelectEmojiAvatar = (emoji: string) => {
+  const handleSelectEmojiAvatar = async (emoji: string) => {
     if (!profileUser) return;
     setEmojiInput(emoji);
     setAvatarInput('');
-    itdDb.updateUser(profileUser.id, { avatar_emoji: emoji, avatar_url: '' });
-    loadProfileData();
+    await supabaseService.updateProfile(profileUser.id, { avatar_emoji: emoji, avatar_url: '' });
+    await loadProfileData();
     onUserUpdated();
   };
 
-  const handleToggleFollow = () => {
+  const handleToggleFollow = async () => {
     if (!currentUser || !profileUser) return;
-    itdDb.toggleFollow(currentUser.id, profileUser.id);
-    loadProfileData();
+    await supabaseService.toggleFollow(currentUser.id, profileUser.id);
+    await loadProfileData();
   };
 
-  const handleSaveProfileEdits = (e: React.FormEvent) => {
+  const handleSaveProfileEdits = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profileUser) return;
-    itdDb.updateUser(profileUser.id, {
+    await supabaseService.updateProfile(profileUser.id, {
       name: nameInput.trim() || profileUser.name,
       bio: bioInput.trim(),
       avatar_url: avatarInput,
       avatar_emoji: emojiInput,
     });
     setShowEditBioModal(false);
-    loadProfileData();
+    await loadProfileData();
     onUserUpdated();
   };
 
@@ -179,27 +198,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   // Skill 3: Блокировка профиля сотрудником
-  const handleToggleBlockProfile = () => {
+  const handleToggleBlockProfile = async () => {
     if (!profileUser) return;
     const nextState = !profileUser.is_blocked;
-    itdDb.setUserBlocked(
+    await supabaseService.setUserBlocked(
       profileUser.id,
       nextState,
       nextState ? 'Блокировка сотрудником платформы ШУМ' : undefined
     );
     setShowActionMenu(false);
-    loadProfileData();
+    await loadProfileData();
     onUserUpdated();
     showToast(nextState ? `Профиль @${profileUser.username} заблокирован` : `Профиль @${profileUser.username} разблокирован`);
   };
 
   // Skill 5: Верификация пользователя сотрудником (галочка справа от имени)
-  const handleToggleVerification = () => {
+  const handleToggleVerification = async () => {
     if (!profileUser) return;
     const nextState = !profileUser.is_verified;
-    itdDb.setUserVerified(profileUser.id, nextState);
+    await supabaseService.setUserVerified(profileUser.id, nextState);
     setShowActionMenu(false);
-    loadProfileData();
+    await loadProfileData();
     onUserUpdated();
     showToast(nextState ? `Верификация установлена (галочка справа от имени)` : `Верификация снята`);
   };

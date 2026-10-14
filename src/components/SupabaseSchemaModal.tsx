@@ -1,6 +1,28 @@
-import React, { useState } from 'react';
-import { Database, X, Copy, Check, Table2, Code2, Layers, Clock, Shield } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Database,
+  X,
+  Copy,
+  Check,
+  Table2,
+  Code2,
+  Shield,
+  Zap,
+  RefreshCw,
+  Key,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
+} from 'lucide-react';
 import { itdDb } from '../lib/storage';
+import {
+  getSupabaseSettings,
+  savePublishableKey,
+  testSupabaseConnection,
+  DEFAULT_SUPABASE_URL,
+} from '../lib/supabase';
+import { showAppToast } from '../lib/toast';
 
 interface SupabaseSchemaModalProps {
   isOpen: boolean;
@@ -11,8 +33,43 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'entities' | 'sql'>('entities');
+  const [activeTab, setActiveTab] = useState<'status' | 'entities' | 'sql' | 'guide'>('status');
   const [copied, setCopied] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    details?: string;
+    hasTables?: boolean;
+  } | null>(null);
+
+  const [settings, setSettings] = useState(getSupabaseSettings());
+
+  useEffect(() => {
+    if (isOpen) {
+      const current = getSupabaseSettings();
+      setSettings(current);
+      setKeyInput(current.anonKey);
+      runAutoTest();
+    }
+  }, [isOpen]);
+
+  const runAutoTest = async () => {
+    const current = getSupabaseSettings();
+    if (!current.isConfigured) {
+      setTestResult({
+        success: false,
+        message: 'Требуется указать Publishable Key (Anon Key) для подключения к Supabase.',
+      });
+      return;
+    }
+
+    setIsTesting(true);
+    const res = await testSupabaseConnection();
+    setTestResult(res);
+    setIsTesting(false);
+  };
 
   if (!isOpen) return null;
 
@@ -22,7 +79,30 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
   const handleCopy = () => {
     navigator.clipboard.writeText(sql);
     setCopied(true);
+    showAppToast('SQL скопирован', 'Скрипт создания таблиц скопирован в буфер обмена', 'success');
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    savePublishableKey(keyInput);
+    const updated = getSupabaseSettings();
+    setSettings(updated);
+    showAppToast('Ключ сохранён', 'Параметры подключения к Supabase обновлены', 'success');
+
+    setIsTesting(true);
+    const res = await testSupabaseConnection();
+    setTestResult(res);
+    setIsTesting(false);
+  };
+
+  const handleClearKey = () => {
+    savePublishableKey('');
+    setKeyInput('');
+    const updated = getSupabaseSettings();
+    setSettings(updated);
+    setTestResult(null);
+    showAppToast('Ключ удалён', 'Приложение вернулось в режим локального резерва', 'info');
   };
 
   const entities = [
@@ -39,7 +119,7 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
         { name: 'avatar_url', type: 'TEXT', desc: 'URL загруженного фото аватара' },
         { name: 'avatar_emoji', type: 'TEXT', desc: 'Выбранный смайлик аватара (если фото не загружено)' },
         { name: 'bio', type: 'TEXT', desc: 'Описание профиля' },
-        { name: 'skills', type: 'TEXT[] DEFAULT \'{}\'', desc: 'Служебные скиллы: support, moderation, block_user, user_card, verification, no_spam, delete_content' },
+        { name: 'skills', type: "TEXT[] DEFAULT '{}'", desc: 'Служебные скиллы: support, moderation, block_user, user_card, verification, delete_content, no_spam' },
         { name: 'is_verified', type: 'BOOLEAN DEFAULT FALSE', desc: 'Верифицированный профиль (галочка справа от имени)' },
         { name: 'is_blocked', type: 'BOOLEAN DEFAULT FALSE', desc: 'Блокировка доступа владельцу' },
         { name: 'blocked_reason', type: 'TEXT', desc: 'Причина блокировки модератором' },
@@ -108,115 +188,111 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
         { name: 'id', type: 'UUID PRIMARY KEY', desc: 'Уникальный ID уведомления' },
         { name: 'user_id', type: 'UUID REFERENCES profiles(id)', desc: 'Получатель уведомления' },
         { name: 'sender_id', type: 'UUID REFERENCES profiles(id)', desc: 'Инициатор (кто лайкнул/подписался)' },
-        { name: 'type', type: 'TEXT', desc: 'Тип события: follow, like, comment' },
+        { name: 'type', type: 'TEXT', desc: 'Тип события: follow, like, comment, system' },
         { name: 'post_id', type: 'UUID', desc: 'ID связанного поста (для перехода)' },
         { name: 'post_number', type: 'INTEGER', desc: 'Номер поста у автора для URL post_{N}' },
-        { name: 'post_author_username', type: 'TEXT', desc: 'Ник автора поста для URL /@{nick}/post_{N}' },
+        { name: 'post_author_username', type: 'TEXT', desc: 'Ник автора поста' },
         { name: 'text', type: 'TEXT', desc: 'Текст уведомления' },
         { name: 'is_read', type: 'BOOLEAN', desc: 'Статус прочтения' },
-        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Точная дата и время создания уведомления' },
+        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Точная дата создания' },
       ],
     },
     {
       name: 'reports',
-      title: '7. Жалобы (Reports)',
+      title: '7. Жалобы и Модерация (Reports)',
       count: stats.reports,
-      desc: 'Жалобы пользователей на публикации при нажатии трех точек (для модерации).',
+      desc: 'Жалобы пользователей на контент для CRM модератора.',
       fields: [
-        { name: 'id', type: 'UUID PRIMARY KEY', desc: 'Уникальный ID жалобы' },
-        { name: 'post_id', type: 'UUID REFERENCES posts(id)', desc: 'Пост, на который пожаловались' },
+        { name: 'id', type: 'UUID PRIMARY KEY', desc: 'ID жалобы' },
+        { name: 'post_id', type: 'UUID REFERENCES posts(id)', desc: 'Пост с нарушением' },
         { name: 'reporter_id', type: 'UUID REFERENCES profiles(id)', desc: 'Кто пожаловался' },
-        { name: 'reason', type: 'TEXT', desc: 'Причина жалобы' },
-        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Дата и время подачи жалобы' },
+        { name: 'reason', type: 'TEXT', desc: 'Выбранная причина' },
+        { name: 'status', type: 'TEXT', desc: 'Статус (pending, accepted, rejected)' },
+        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Дата отправки' },
       ],
     },
     {
       name: 'support_tickets',
       title: '8. Тикеты Поддержки (Support Tickets)',
       count: stats.tickets,
-      desc: 'Обращения пользователей в саппорт (Помощь / support): тема, подробное описание, фото/видео, статус и уведомления ответов.',
+      desc: 'Обращения пользователей в службу заботы.',
       fields: [
-        { name: 'id', type: 'UUID PRIMARY KEY', desc: 'Уникальный ID тикета' },
+        { name: 'id', type: 'UUID PRIMARY KEY', desc: 'ID обращения' },
         { name: 'user_id', type: 'UUID REFERENCES profiles(id)', desc: 'Автор обращения' },
-        { name: 'problem_title', type: 'TEXT', desc: 'Опишите проблему' },
-        { name: 'problem_description', type: 'TEXT', desc: 'Расскажите о проблеме подробнее' },
-        { name: 'attachments', type: 'JSONB', desc: 'Прикреплённые фото и видео файлы' },
-        { name: 'status', type: 'TEXT', desc: 'Статус (open, in_progress, answered, resolved)' },
-        { name: 'has_unread_reply', type: 'BOOLEAN', desc: 'Индикатор непрочитанного ответа (+1)' },
-        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Дата создания обращения' },
-        { name: 'updated_at', type: 'TIMESTAMPTZ', desc: 'Дата последнего обновления' },
-      ],
-    },
-    {
-      name: 'support_messages',
-      title: '9. Сообщения Саппорта (Support Messages)',
-      count: stats.tickets > 0 ? stats.tickets : 0,
-      desc: 'Диалог внутри тикета поддержки между пользователем и Службой заботы ШУМ с историей, фиксацией сотрудника и файлами.',
-      fields: [
-        { name: 'id', type: 'UUID PRIMARY KEY', desc: 'Уникальный ID сообщения' },
-        { name: 'ticket_id', type: 'UUID REFERENCES support_tickets(id)', desc: 'Связанный тикет' },
-        { name: 'sender_role', type: 'TEXT', desc: 'Роль отправителя (user / support / system)' },
-        { name: 'sender_name', type: 'TEXT', desc: 'Имя для клиента ("Поддержка")' },
-        { name: 'operator_id', type: 'UUID REFERENCES profiles(id)', desc: 'ID ответившего сотрудника саппорта' },
-        { name: 'operator_name', type: 'TEXT', desc: 'Имя сотрудника (Владимир)' },
-        { name: 'operator_username', type: 'TEXT', desc: 'Короткий никнейм (@pepelyaev)' },
-        { name: 'operator_display_name', type: 'TEXT', desc: 'Зафиксированный номер саппорта в CRM ("Саппорт #1")' },
-        { name: 'text', type: 'TEXT', desc: 'Текст ответа саппорта или уточнения' },
-        { name: 'attachments', type: 'JSONB', desc: 'Прикрепленные файлы' },
-        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Дата и время сообщения' },
-      ],
-    },
-    {
-      name: 'support_settings',
-      title: '10. Настройки Поддержки (Support Settings)',
-      count: 1,
-      desc: 'Глобальные параметры службы заботы: единое фото ответов от лица саппорта и закрепленные отображаемые номера сотрудников (Саппорт #1, #2...).',
-      fields: [
-        { name: 'id', type: 'TEXT PRIMARY KEY', desc: 'Глобальный идентификатор' },
-        { name: 'support_avatar_url', type: 'TEXT', desc: 'URL/DataURI единого фото саппорта' },
-        { name: 'agent_display_names', type: 'JSONB', desc: 'Карта номеров сотрудников (userId -> Саппорт #1)' },
-        { name: 'updated_at', type: 'TIMESTAMPTZ', desc: 'Дата последнего изменения' },
+        { name: 'problem_title', type: 'TEXT', desc: 'Краткая суть проблемы' },
+        { name: 'problem_description', type: 'TEXT', desc: 'Подробное описание' },
+        { name: 'attachments', type: 'JSONB', desc: 'Прикреплённые файлы' },
+        { name: 'status', type: 'TEXT', desc: 'Статус (open, in_progress, answered, resolved, unanswered)' },
+        { name: 'has_unread_reply', type: 'BOOLEAN', desc: 'Флаг непрочитанного ответа' },
+        { name: 'created_at', type: 'TIMESTAMPTZ', desc: 'Дата создания' },
       ],
     },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#18181b] border border-neutral-800 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+      <div className="bg-[#18181b] border border-neutral-800 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-[#141416]">
           <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <div className={`p-2.5 rounded-2xl border ${
+              settings.isConfigured
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+            }`}>
               <Database className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base">
-                Структура Базы Данных (Supabase / PostgreSQL)
-              </h3>
-              <p className="text-xs text-neutral-400">
-                Все сущности социальной сети ШУМ, логирование дат, фактов подписок, лайков, комментов и уведомлений
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-white text-base">
+                  Интеграция Supabase
+                </h3>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
+                  settings.isConfigured
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
+                    : 'bg-amber-950/80 text-amber-300 border-amber-800/80'
+                }`}>
+                  {settings.isConfigured ? 'Ключ подключен' : 'Резервный режим (Local)'}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-400 font-mono mt-0.5">
+                {DEFAULT_SUPABASE_URL}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition"
+            className="p-2 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Controls */}
-        <div className="flex items-center px-6 pt-3 border-b border-neutral-800/80 bg-[#141416] gap-3">
+        <div className="flex items-center px-6 pt-3 border-b border-neutral-800/80 bg-[#141416] gap-2 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveTab('status')}
+            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative whitespace-nowrap ${
+              activeTab === 'status' ? 'text-white' : 'text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <Zap className="w-4 h-4" />
+            <span>Статус подключения</span>
+            {activeTab === 'status' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveTab('entities')}
-            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative ${
+            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative whitespace-nowrap ${
               activeTab === 'entities' ? 'text-white' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <Table2 className="w-4 h-4" />
-            <span>Сущности и логирование ({entities.length})</span>
+            <span>Таблицы и сущности ({entities.length})</span>
             {activeTab === 'entities' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
             )}
@@ -225,13 +301,27 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('sql')}
-            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative ${
+            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative whitespace-nowrap ${
               activeTab === 'sql' ? 'text-white' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <Code2 className="w-4 h-4" />
-            <span>SQL DDL Скрипт</span>
+            <span>SQL Миграция (DDL + RLS)</span>
             {activeTab === 'sql' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('guide')}
+            className={`pb-3 px-3 text-xs sm:text-sm font-semibold flex items-center space-x-2 transition relative whitespace-nowrap ${
+              activeTab === 'guide' ? 'text-white' : 'text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span>Инструкция по настройке</span>
+            {activeTab === 'guide' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400 rounded-full" />
             )}
           </button>
@@ -239,7 +329,137 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-5 bg-[#0f0f11]">
-          {activeTab === 'entities' ? (
+          {activeTab === 'status' && (
+            <div className="space-y-6">
+              {/* Project Info Card */}
+              <div className="p-5 bg-[#18181b] border border-neutral-800 rounded-2xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                      Supabase Project URL
+                    </span>
+                    <div className="text-base font-mono font-bold text-white mt-0.5">
+                      {settings.url}
+                    </div>
+                  </div>
+                  <a
+                    href="https://supabase.com/dashboard/project/ioxqhmnwegxdqxbfhwzg"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-200 font-semibold transition"
+                  >
+                    <span>Открыть Dashboard</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+
+                <div className="pt-3 border-t border-neutral-800/80 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs text-neutral-400">Источник ключа:</span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-neutral-900 border border-neutral-800 text-neutral-300">
+                      {settings.source === 'env'
+                        ? 'Переменная окружения (VITE_SUPABASE_ANON_KEY)'
+                        : settings.source === 'storage'
+                        ? 'Сохранён в браузере (LocalStorage)'
+                        : 'Не задан'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={runAutoTest}
+                    disabled={isTesting}
+                    className="inline-flex items-center space-x-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
+                    <span>Проверить связь</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Test Connection Banner */}
+              {testResult && (
+                <div
+                  className={`p-4 rounded-2xl border flex items-start space-x-3.5 ${
+                    testResult.success
+                      ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-200'
+                      : 'bg-amber-950/40 border-amber-800/60 text-amber-200'
+                  }`}
+                >
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1 text-xs">
+                    <div className="font-semibold text-sm">
+                      {testResult.message}
+                    </div>
+                    {testResult.details && (
+                      <div className="font-mono text-[11px] opacity-80 break-all">
+                        {testResult.details}
+                      </div>
+                    )}
+                    {testResult.success && testResult.hasTables === false && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('sql')}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold text-xs hover:bg-emerald-400 transition"
+                        >
+                          Перейти к SQL-миграции
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Publishable Key Form */}
+              <div className="p-5 bg-[#18181b] border border-neutral-800 rounded-2xl space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Key className="w-4 h-4 text-emerald-400" />
+                  <h4 className="font-bold text-white text-sm">
+                    Publishable Key (Anon Key)
+                  </h4>
+                </div>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Публичный ключ безопасен для использования в клиентском браузере и защищается Row Level Security (RLS).
+                  Вы можете добавить его в <code className="text-neutral-200 bg-neutral-900 px-1 py-0.5 rounded">.env</code> как <code className="text-neutral-200 bg-neutral-900 px-1 py-0.5 rounded">VITE_SUPABASE_ANON_KEY</code> или вставить прямо здесь:
+                </p>
+
+                <form onSubmit={handleSaveKey} className="space-y-3">
+                  <input
+                    type="password"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#121214] border border-neutral-800 text-white font-mono text-xs focus:outline-none focus:border-emerald-500/80 transition"
+                  />
+
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="submit"
+                      disabled={!keyInput.trim() || isTesting}
+                      className="px-4 py-2 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition disabled:opacity-50"
+                    >
+                      {isTesting ? 'Проверка...' : 'Сохранить и подключить'}
+                    </button>
+                    {settings.anonKey && (
+                      <button
+                        type="button"
+                        onClick={handleClearKey}
+                        className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white font-medium text-xs border border-neutral-800 transition"
+                      >
+                        Очистить ключ
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'entities' && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 bg-[#18181b] border border-neutral-800 rounded-2xl">
@@ -269,7 +489,7 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
                     <div>
                       <h4 className="font-bold text-white text-sm sm:text-base flex items-center space-x-2">
                         <span>{entity.title}</span>
-                        <code className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                        <code className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20 font-mono">
                           table: {entity.name}
                         </code>
                       </h4>
@@ -311,9 +531,87 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="relative font-mono text-xs text-neutral-300 bg-[#121214] p-4 rounded-2xl border border-neutral-800">
-              <pre className="whitespace-pre-wrap leading-relaxed">{sql}</pre>
+          )}
+
+          {activeTab === 'sql' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-[#18181b] border border-neutral-800 rounded-2xl text-xs text-neutral-300">
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-white">Готовая SQL-миграция PostgreSQL</div>
+                  <div className="text-neutral-400">
+                    Содержит таблицы, внешние ключи, каскадное удаление, индексы, RLS-политики и триггеры.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition shadow shrink-0 ml-3"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>Скопировано!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Скопировать SQL</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="relative font-mono text-xs text-neutral-300 bg-[#121214] p-4 rounded-2xl border border-neutral-800 max-h-[500px] overflow-y-auto">
+                <pre className="whitespace-pre-wrap leading-relaxed">{sql}</pre>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'guide' && (
+            <div className="space-y-5 text-neutral-300 text-xs leading-relaxed">
+              <div className="p-5 bg-[#18181b] border border-neutral-800 rounded-2xl space-y-4">
+                <h4 className="font-bold text-white text-sm flex items-center space-x-2">
+                  <span>Быстрый старт в 3 шага</span>
+                </h4>
+
+                <div className="space-y-4">
+                  <div className="flex items-start space-x-3">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold shrink-0">
+                      1
+                    </span>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-white">Скопируйте SQL-миграцию</div>
+                      <p className="text-neutral-400">
+                        Перейдите на вкладку «SQL Миграция» и нажмите «Скопировать SQL».
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold shrink-0">
+                      2
+                    </span>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-white">Выполните SQL в Supabase Dashboard</div>
+                      <p className="text-neutral-400">
+                        Откройте <a href="https://supabase.com/dashboard/project/ioxqhmnwegxdqxbfhwzg/sql/new" target="_blank" rel="noreferrer" className="text-emerald-400 underline">SQL Editor</a> вашего проекта Supabase, вставьте скрипт и нажмите <strong>Run</strong>.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold shrink-0">
+                      3
+                    </span>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-white">Скопируйте Anon Key</div>
+                      <p className="text-neutral-400">
+                        В Supabase перейдите в <strong>Project Settings → API</strong>, скопируйте <strong>anon / public</strong> ключ и вставьте его во вкладке «Статус подключения» либо в файл <code className="text-neutral-200 bg-neutral-900 px-1 py-0.5 rounded">.env</code>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -325,20 +623,10 @@ export const SupabaseSchemaModal: React.FC<SupabaseSchemaModalProps> = ({
             <span>Совместимо с Supabase PostgreSQL, RLS и индексы включены</span>
           </span>
           <button
-            onClick={handleCopy}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition shadow"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs transition"
           >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span>SQL скопирован!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                <span>Скопировать SQL DDL</span>
-              </>
-            )}
+            Закрыть
           </button>
         </div>
       </div>

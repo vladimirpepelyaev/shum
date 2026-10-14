@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Search, User, FileText, ArrowRight } from 'lucide-react';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { DbUser, PostWithMeta } from '../types/database';
 import { Avatar } from './Avatar';
 import { PostCard } from './PostCard';
@@ -19,9 +20,26 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onOpenReportModal,
 }) => {
   const [query, setQuery] = useState('');
+  const [users, setUsers] = useState<DbUser[]>([]);
+  const [allPosts, setAllPosts] = useState<PostWithMeta[]>([]);
 
-  const users = itdDb.getAllUsers();
-  const allPosts = itdDb.getFeedPosts('for_you');
+  const loadSearchData = async () => {
+    try {
+      const [userList, postList] = await Promise.all([
+        supabaseService.getAllUsers(),
+        supabaseService.getFeedPosts('for_you', currentUser?.id),
+      ]);
+      setUsers(userList);
+      setAllPosts(postList);
+    } catch {
+      setUsers(itdDb.getAllUsers());
+      setAllPosts(itdDb.getFeedPosts('for_you'));
+    }
+  };
+
+  useEffect(() => {
+    loadSearchData();
+  }, [currentUser]);
 
   // Filter users by query
   const matchingUsers = useMemo(() => {

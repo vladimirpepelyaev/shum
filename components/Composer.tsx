@@ -5,6 +5,9 @@ import { Avatar } from './Avatar';
 import { itdDb } from '../lib/storage';
 import { IosEmojiPicker } from './IosEmojiPicker';
 
+import { supabaseService } from '../lib/supabaseService';
+import { showAppToast } from '../lib/toast';
+
 interface ComposerProps {
   currentUser: DbUser;
   onPostCreated: (post: DbPost) => void;
@@ -20,27 +23,35 @@ export const Composer: React.FC<ComposerProps> = ({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() && !imageUrl) return;
 
-    const newPost = itdDb.createPost({
-      userId: currentUser.id,
-      content: content.trim(),
-      image_url: imageUrl,
-      is_pinned: isPinned,
-    });
+    setIsSubmitting(true);
+    try {
+      const newPost = await supabaseService.createPost({
+        userId: currentUser.id,
+        content: content.trim(),
+        image_url: imageUrl,
+        is_pinned: isPinned,
+      });
 
-    setContent('');
-    setImageUrl(null);
-    setShowEmojiPicker(false);
-    setIsPinned(false);
+      setContent('');
+      setImageUrl(null);
+      setShowEmojiPicker(false);
+      setIsPinned(false);
 
-    onPostCreated(newPost);
+      onPostCreated(newPost);
+    } catch (err: any) {
+      showAppToast('Ошибка публикации', err?.message || 'Не удалось сохранить пост в Supabase', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Directly handle native file dialog selection
@@ -95,7 +106,7 @@ export const Composer: React.FC<ComposerProps> = ({
     }
   };
 
-  const isSubmitDisabled = !content.trim() && !imageUrl;
+  const isSubmitDisabled = (!content.trim() && !imageUrl) || isSubmitting;
 
   return (
     <div className="bg-[#1c1c20] border border-neutral-800/80 rounded-3xl p-4 sm:p-5 shadow-sm">
@@ -206,7 +217,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 disabled={isSubmitDisabled}
                 className="px-5 py-2.5 rounded-2xl bg-white disabled:bg-neutral-800 disabled:text-neutral-500 text-black font-semibold text-xs sm:text-sm hover:bg-neutral-200 transition shadow"
               >
-                Опубликовать
+                {isSubmitting ? 'Публикация...' : 'Опубликовать'}
               </button>
             </div>
           </div>

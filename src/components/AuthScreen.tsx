@@ -12,8 +12,10 @@ import {
   Lock,
   ArrowRight,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { DbUser } from '../types/database';
 import { EmojiAvatarPickerModal } from './EmojiAvatarPickerModal';
 import { showAppToast } from '../lib/toast';
@@ -84,9 +86,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
     if (file) handleAvatarFile(file);
   };
 
-  // Login handler: username OR email, no profiles saved, no confirmation code
-  const handleLogin = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Login handler: username OR email with Supabase / local fallback
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError(null);
 
     const identifier = loginIdentifier.trim();
@@ -99,22 +104,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      const user = itdDb.loginUser(identifier, loginPassword);
+      const res = await supabaseService.signIn(identifier, loginPassword);
+      if (res.error || !res.user) {
+        setError(res.error || 'Неверный логин, почта или пароль');
+        setIsSubmitting(false);
+        return;
+      }
+
       showAppToast(
         'Вход выполнен',
-        `С возвращением в ШУМ, ${user.name}!`,
+        `С возвращением в ШУМ, ${res.user.name}!`,
         'success'
       );
-      onSuccess(user);
+      onSuccess(res.user);
     } catch (err: any) {
       setError(err?.message || 'Неверный логин, почта или пароль');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Direct registration handler: no email sync step, no confirmation code
-  const handleRegister = (e: React.FormEvent) => {
+  // Direct registration handler with Supabase PostgreSQL and local sync
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError(null);
 
     const cleanNick = regUsername.trim().replace(/^@/, '').toLowerCase();
@@ -144,45 +159,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       return;
     }
 
-    // Check if username is already taken
-    const existingNick = itdDb.getUserByUsername(cleanNick);
-    if (existingNick) {
-      setError(`Никнейм @${cleanNick} уже занят другим пользователем`);
-      return;
-    }
-
-    // Check if email is already taken (if provided)
-    if (cleanEmail) {
-      const existingEmail = itdDb.getAllUsers().find(
-        (u) => u.email && u.email.toLowerCase() === cleanEmail
-      );
-      if (existingEmail) {
-        setError(`Почта ${cleanEmail} уже зарегистрирована. Войдите в существующий аккаунт.`);
-        return;
-      }
-    }
-
+    setIsSubmitting(true);
     try {
-      const user = itdDb.registerUser({
+      const targetEmail = cleanEmail || `${cleanNick}@shum.net`;
+      const res = await supabaseService.signUp({
         name: cleanName,
         username: cleanNick,
-        email: cleanEmail || `${cleanNick}@shum.net`,
-        email_verified: true,
+        email: targetEmail,
         password: regPassword,
         bio: regBio.trim(),
         avatar_url: avatarUrl || '',
         avatar_emoji: avatarEmoji || null,
       });
 
+      if (res.error || !res.user) {
+        setError(res.error || 'Ошибка регистрации профиля');
+        setIsSubmitting(false);
+        return;
+      }
+
       showAppToast(
         'Регистрация завершена',
-        `Добро пожаловать в ШУМ, ${user.name}!`,
+        `Добро пожаловать в ШУМ, ${res.user.name}!`,
         'success'
       );
 
-      onSuccess(user);
+      onSuccess(res.user);
     } catch (err: any) {
       setError(err?.message || 'Ошибка регистрации профиля');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -292,10 +298,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-white hover:bg-neutral-200 text-black font-semibold text-sm transition mt-3 shadow-md flex items-center justify-center space-x-2"
+                disabled={isSubmitting}
+                className="w-full py-3 rounded-2xl bg-white hover:bg-neutral-200 text-black font-semibold text-sm transition mt-3 shadow-md flex items-center justify-center space-x-2 disabled:opacity-60"
               >
-                <span>Войти</span>
-                <ArrowRight className="w-4 h-4" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Вход...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Войти</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </form>
           ) : (
@@ -501,10 +517,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               {/* Submit button: direct instant registration */}
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-white hover:bg-neutral-200 text-black font-semibold text-sm transition mt-3 shadow-md flex items-center justify-center space-x-2"
+                disabled={isSubmitting}
+                className="w-full py-3 rounded-2xl bg-white hover:bg-neutral-200 text-black font-semibold text-sm transition mt-3 shadow-md flex items-center justify-center space-x-2 disabled:opacity-60"
               >
-                <span>Зарегистрироваться</span>
-                <Sparkles className="w-4 h-4" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Регистрация...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Зарегистрироваться</span>
+                    <Sparkles className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </form>
           )}

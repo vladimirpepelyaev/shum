@@ -1,18 +1,15 @@
 import React from 'react';
-import { Database } from 'lucide-react';
 import { LegalDocType } from './LegalModal';
 
 interface FooterLinksProps {
   onNavigateToSupport: () => void;
   onOpenLegal: (type: LegalDocType) => void;
-  onOpenSchemaModal?: () => void;
   hasUnreadSupport?: boolean;
 }
 
 export const FooterLinks: React.FC<FooterLinksProps> = ({
   onNavigateToSupport,
   onOpenLegal,
-  onOpenSchemaModal,
   hasUnreadSupport = false,
 }) => {
   return (
@@ -59,19 +56,6 @@ export const FooterLinks: React.FC<FooterLinksProps> = ({
           Политика Cookie
         </button>
       </div>
-
-      {onOpenSchemaModal && (
-        <div className="pt-1">
-          <button
-            type="button"
-            onClick={onOpenSchemaModal}
-            className="inline-flex items-center space-x-1.5 text-neutral-400 hover:text-white transition text-[11px]"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>Структура БД</span>
-          </button>
-        </div>
-      )}
 
       <div className="pt-3 text-[11px] text-neutral-600">
         ООО «Шум» 2026

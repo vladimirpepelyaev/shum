@@ -15,6 +15,7 @@ import {
 import { PostWithMeta, DbUser } from '../types/database';
 import { Avatar } from './Avatar';
 import { itdDb, getImageFingerprint } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { showAppToast } from '../lib/toast';
 
 interface PostCardProps {
@@ -84,12 +85,20 @@ export const PostCard: React.FC<PostCardProps> = ({
     };
   }, [showMenu]);
 
-  // Handle Likes
-  const handleLikeClick = (e: React.MouseEvent) => {
+  // Handle Likes via Supabase
+  const [isLiking, setIsLiking] = useState(false);
+  const handleLikeClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!currentUser) return;
-    itdDb.toggleLike(post.id, currentUser.id);
-    onPostUpdated();
+    if (!currentUser || isLiking) return;
+    setIsLiking(true);
+    try {
+      await supabaseService.toggleLike(post.id, currentUser.id);
+      onPostUpdated();
+    } catch (err: any) {
+      showAppToast('Ошибка лайка', err?.message || 'Не удалось поставить лайк', 'error');
+    } finally {
+      setIsLiking(false);
+    }
   };
 
   // Rule 3: Copy post link to clipboard
@@ -110,11 +119,11 @@ export const PostCard: React.FC<PostCardProps> = ({
   const hasDeleteSkill = userSkills.includes('delete_content') || userSkills.includes('moderation');
   const canDeletePost = isAuthor || hasDeleteSkill;
 
-  const handleDeletePost = (e: React.MouseEvent) => {
+  const handleDeletePost = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!currentUser || !canDeletePost) return;
     try {
-      itdDb.deletePost(post.id, currentUser.id);
+      await supabaseService.deletePost(post.id, currentUser.id);
       showAppToast('Публикация удалена', 'Пост успешно удалён из ленты и профиля', 'info');
       setShowMenu(false);
       onPostUpdated();

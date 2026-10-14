@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DbUser, DbSupportTicket, DbSupportAttachment } from '../types/database';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { Avatar } from './Avatar';
 
 interface SupportViewProps {
@@ -42,12 +43,21 @@ export const SupportView: React.FC<SupportViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const reloadTickets = () => {
-    const userTickets = itdDb.getSupportTickets(currentUser.id);
-    setTickets(userTickets);
+  const reloadTickets = async () => {
+    try {
+      const userTickets = await supabaseService.getSupportTickets(currentUser.id);
+      setTickets(userTickets);
 
-    if (userTickets.length === 0 && !selectedTicketId) {
-      setIsCreatingTicket(true);
+      if (userTickets.length === 0 && !selectedTicketId) {
+        setIsCreatingTicket(true);
+      }
+    } catch {
+      const userTickets = itdDb.getSupportTickets(currentUser.id);
+      setTickets(userTickets);
+
+      if (userTickets.length === 0 && !selectedTicketId) {
+        setIsCreatingTicket(true);
+      }
     }
   };
 
@@ -66,9 +76,10 @@ export const SupportView: React.FC<SupportViewProps> = ({
     if (selectedTicketId) {
       const ticket = tickets.find((t) => t.id === selectedTicketId);
       if (ticket && ticket.has_unread_reply) {
-        itdDb.markTicketAsRead(selectedTicketId);
-        reloadTickets();
-        if (onTicketRead) onTicketRead();
+        supabaseService.markTicketAsRead(selectedTicketId).then(() => {
+          reloadTickets();
+          if (onTicketRead) onTicketRead();
+        });
       }
     }
   }, [selectedTicketId]);
@@ -109,7 +120,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmitTicket = (e: React.FormEvent) => {
+  const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -124,7 +135,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
 
     setIsSubmitting(true);
     try {
-      const newTicket = itdDb.createSupportTicket({
+      const newTicket = await supabaseService.createSupportTicket({
         userId: currentUser.id,
         problemTitle: problemTitle.trim(),
         problemDescription: problemDescription.trim(),
@@ -137,7 +148,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       setIsCreatingTicket(false);
       setSelectedTicketId(newTicket.id);
 
-      reloadTickets();
+      await reloadTickets();
     } catch (err: any) {
       setErrorMessage(err.message || 'Ошибка создания обращения');
     } finally {
@@ -145,16 +156,17 @@ export const SupportView: React.FC<SupportViewProps> = ({
     }
   };
 
-  const handleSendReply = (ticketId: string) => {
+  const handleSendReply = async (ticketId: string) => {
     if (!replyText.trim()) return;
 
-    itdDb.addSupportMessage(ticketId, {
-      sender_role: 'user',
-      sender_name: currentUser.name,
-      text: replyText.trim(),
-    });
+    const text = replyText.trim();
     setReplyText('');
-    reloadTickets();
+    await supabaseService.addSupportMessage(ticketId, {
+      senderRole: 'user',
+      senderName: currentUser.name,
+      text,
+    });
+    await reloadTickets();
   };
 
   const selectedTicket = tickets.find((t) => t.id === selectedTicketId);

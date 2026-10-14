@@ -12,13 +12,13 @@ import { UserCardView } from './components/UserCardView';
 import { NoSpamAdminView } from './components/NoSpamAdminView';
 import { FooterLinks } from './components/FooterLinks';
 import { LegalModal, LegalDocType } from './components/LegalModal';
-import { SkillsManageModal } from './components/SkillsManageModal';
 import { AuthScreen } from './components/AuthScreen';
 import { BlockedScreen } from './components/BlockedScreen';
 import { ReportModal } from './components/ReportModal';
-import { SupabaseSchemaModal } from './components/SupabaseSchemaModal';
 import { ToastContainer } from './components/ToastContainer';
 import { itdDb } from './lib/storage';
+import { supabaseService } from './lib/supabaseService';
+import { getSupabaseSettings, testSupabaseConnection } from './lib/supabase';
 import { DbUser } from './types/database';
 import {
   Menu,
@@ -31,6 +31,8 @@ import {
   LifeBuoy,
   User as UserIcon,
   ShieldAlert,
+  Database,
+  Key,
 } from 'lucide-react';
 
 interface RouteState {
@@ -57,8 +59,6 @@ export default function App() {
   const [route, setRoute] = useState<RouteState>({ type: 'feed', rawPath: '/' });
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportingPostId, setReportingPostId] = useState<string | null>(null);
-  const [isSchemaModalOpen, setIsSchemaModalOpen] = useState(false);
-  const [isSkillsModalOpen, setIsSkillsModalOpen] = useState(false);
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocType>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -180,27 +180,47 @@ export default function App() {
   // Initial load & seed
   useEffect(() => {
     itdDb.ensureSeedData();
-    const user = itdDb.getCurrentUser();
-    setCurrentUser(user);
 
-    const initialPath = window.location.hash
-      ? window.location.hash.replace(/^#/, '')
-      : window.location.pathname || '/';
+    // Load initial user session (from Supabase or local fallback)
+    const initUser = async () => {
+      try {
+        const user = await supabaseService.getCurrentUser();
+        setCurrentUser(user);
+      } catch (e) {
+        console.warn('Failed to load user session:', e);
+        setCurrentUser(itdDb.getCurrentUser());
+      }
+    };
+    initUser();
 
+    const getPathFromLocation = (): string => {
+      if (typeof window === 'undefined') return '/';
+      if (window.location.hash && window.location.hash.startsWith('#/')) {
+        return window.location.hash.slice(1);
+      }
+      const pathname = window.location.pathname || '/';
+      const search = window.location.search || '';
+      const hash = window.location.hash || '';
+      return `${pathname}${search}${hash}`;
+    };
+
+    const initialPath = getPathFromLocation();
     setCurrentPath(initialPath);
     setRoute(parsePath(initialPath));
     setIsInitialized(true);
 
-    const handlePopState = () => {
-      const p = window.location.hash
-        ? window.location.hash.replace(/^#/, '')
-        : window.location.pathname || '/';
+    const handleLocationChange = () => {
+      const p = getPathFromLocation();
       setCurrentPath(p);
       setRoute(parsePath(p));
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
   }, [parsePath]);
 
   // Periodic polling for background support responses and notifications
@@ -212,8 +232,8 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  const handleLogout = () => {
-    itdDb.setCurrentUserId(null);
+  const handleLogout = async () => {
+    await supabaseService.signOut();
     setCurrentUser(null);
   };
 
@@ -222,9 +242,13 @@ export default function App() {
     setIsReportOpen(true);
   };
 
-  const handleUserUpdated = () => {
-    const updated = itdDb.getCurrentUser();
-    setCurrentUser(updated);
+  const handleUserUpdated = async () => {
+    try {
+      const updated = await supabaseService.getCurrentUser();
+      setCurrentUser(updated);
+    } catch {
+      setCurrentUser(itdDb.getCurrentUser());
+    }
     setTick((t) => t + 1);
   };
 
@@ -310,8 +334,6 @@ export default function App() {
             currentUser={currentUser}
             onNavigate={navigate}
             onOpenAuth={() => setCurrentUser(null)}
-            onOpenSchemaModal={() => setIsSchemaModalOpen(true)}
-            onOpenSkillsModal={() => setIsSkillsModalOpen(true)}
             onLogout={handleLogout}
             unreadCount={unreadNotifs}
             unreadSupportCount={unreadSupportCount}
@@ -342,14 +364,6 @@ export default function App() {
                   setMobileMenuOpen(false);
                   setCurrentUser(null);
                 }}
-                onOpenSchemaModal={() => {
-                  setMobileMenuOpen(false);
-                  setIsSchemaModalOpen(true);
-                }}
-                onOpenSkillsModal={() => {
-                  setMobileMenuOpen(false);
-                  setIsSkillsModalOpen(true);
-                }}
                 onLogout={() => {
                   setMobileMenuOpen(false);
                   handleLogout();
@@ -372,10 +386,6 @@ export default function App() {
                 onOpenLegal={(type) => {
                   setMobileMenuOpen(false);
                   setActiveLegalDoc(type);
-                }}
-                onOpenSchemaModal={() => {
-                  setMobileMenuOpen(false);
-                  setIsSchemaModalOpen(true);
                 }}
                 hasUnreadSupport={unreadSupportCount > 0}
               />
@@ -501,7 +511,6 @@ export default function App() {
           <FooterLinks
             onNavigateToSupport={() => navigate('/support')}
             onOpenLegal={(type) => setActiveLegalDoc(type)}
-            onOpenSchemaModal={() => setIsSchemaModalOpen(true)}
             hasUnreadSupport={unreadSupportCount > 0}
           />
         </div>
@@ -520,20 +529,6 @@ export default function App() {
           onSuccess={() => {}}
         />
       )}
-
-      {/* Supabase Schema Modal for verifying database DDL structure and entities */}
-      <SupabaseSchemaModal
-        isOpen={isSchemaModalOpen}
-        onClose={() => setIsSchemaModalOpen(false)}
-      />
-
-      {/* Skills Management Modal for Staff and Admin */}
-      <SkillsManageModal
-        isOpen={isSkillsModalOpen}
-        onClose={() => setIsSkillsModalOpen(false)}
-        currentUser={currentUser}
-        onUserUpdated={handleUserUpdated}
-      />
 
       {/* Legal Documents Modal */}
       <LegalModal

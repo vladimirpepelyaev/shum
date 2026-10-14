@@ -19,6 +19,8 @@ const REPORT_REASONS = [
   'Другое',
 ];
 
+import { supabaseService } from '../lib/supabaseService';
+
 export const ReportModal: React.FC<ReportModalProps> = ({
   isOpen,
   onClose,
@@ -32,14 +34,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalReason =
       selectedReason === 'Другое' && customReason.trim()
         ? `Другое: ${customReason.trim()}`
         : selectedReason;
 
-    itdDb.createReport({
+    await supabaseService.createReport({
       postId,
       reporterId,
       reason: finalReason,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   ExternalLink,
@@ -12,8 +12,9 @@ import {
   X,
   Plus
 } from 'lucide-react';
-import { DbUser, StaffSkill, DbModerationLog, DbUserNote } from '../types/database';
+import { DbUser, StaffSkill, DbModerationLog, DbUserNote, DbSupportTicket } from '../types/database';
 import { itdDb } from '../lib/storage';
+import { supabaseService } from '../lib/supabaseService';
 import { Avatar } from './Avatar';
 import { showAppToast } from '../lib/toast';
 
@@ -34,8 +35,11 @@ export const UserCardView: React.FC<UserCardViewProps> = ({
   onUserUpdated,
   onNavigateToTicketPath,
 }) => {
-  const targetUser = itdDb.getUserByUsername(targetUsername);
-  const [, setTick] = useState(0);
+  const [targetUser, setTargetUser] = useState<DbUser | null>(null);
+  const [postsCount, setPostsCount] = useState(0);
+  const [userTickets, setUserTickets] = useState<DbSupportTicket[]>([]);
+  const [moderationLogs, setModerationLogs] = useState<DbModerationLog[]>([]);
+  const [userNotes, setUserNotes] = useState<DbUserNote[]>([]);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Modal / drawer state for user's support tickets
@@ -47,6 +51,40 @@ export const UserCardView: React.FC<UserCardViewProps> = ({
 
   // Note form state
   const [noteInput, setNoteInput] = useState('');
+
+  const loadUserData = async () => {
+    try {
+      const user = await supabaseService.getUserByUsername(targetUsername);
+      if (!user) {
+        setTargetUser(itdDb.getUserByUsername(targetUsername));
+        return;
+      }
+      setTargetUser(user);
+
+      const [posts, tickets, notes] = await Promise.all([
+        supabaseService.getUserPosts(user.id),
+        supabaseService.getSupportTickets(user.id),
+        supabaseService.getUserNotes(user.id),
+      ]);
+      setPostsCount(posts.length);
+      setUserTickets(tickets);
+      setUserNotes(notes);
+      setModerationLogs(itdDb.getModerationLogs(user.id));
+    } catch {
+      const user = itdDb.getUserByUsername(targetUsername);
+      setTargetUser(user);
+      if (user) {
+        setPostsCount(itdDb.getUserPosts(user.id).length);
+        setUserTickets(itdDb.getSupportTickets(user.id));
+        setModerationLogs(itdDb.getModerationLogs(user.id));
+        setUserNotes(itdDb.getUserNotes(user.id));
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadUserData();
+  }, [targetUsername]);
 
   if (!targetUser) {
     return (
@@ -62,70 +100,55 @@ export const UserCardView: React.FC<UserCardViewProps> = ({
     );
   }
 
-  const postsCount = itdDb.getUserPosts(targetUser.id).length;
-  const userTickets = itdDb.getSupportTickets(targetUser.id);
-  const moderationLogs = itdDb.getModerationLogs(targetUser.id);
-  const userNotes = itdDb.getUserNotes(targetUser.id);
-
   const showToast = (msg: string) => {
     setSuccessToast(msg);
     setTimeout(() => setSuccessToast(null), 3000);
   };
 
-  const handleToggleVerification = () => {
+  const handleToggleVerification = async () => {
     const nextVal = !targetUser.is_verified;
-    itdDb.setUserVerified(targetUser.id, nextVal);
-    setTick((t) => t + 1);
+    await supabaseService.setUserVerified(targetUser.id, nextVal);
+    await loadUserData();
     showToast(nextVal ? 'Верификация установлена' : 'Верификация снята');
     if (onUserUpdated) onUserUpdated();
   };
 
-  const handleConfirmBlock = (e: React.FormEvent) => {
+  const handleConfirmBlock = async (e: React.FormEvent) => {
     e.preventDefault();
     const reason = blockReasonInput.trim() || 'Нарушение правил сообщества';
-    itdDb.setUserBlocked(
-      targetUser.id,
-      true,
-      reason,
-      currentUser.id,
-      currentUser.name
-    );
+    await supabaseService.setUserBlocked(targetUser.id, true, reason);
     setShowBlockModal(false);
     setBlockReasonInput('');
-    setTick((t) => t + 1);
+    await loadUserData();
     showToast(`Профиль @${targetUser.username} заблокирован`);
     if (onUserUpdated) onUserUpdated();
   };
 
-  const handleUnblock = () => {
-    itdDb.setUserBlocked(
-      targetUser.id,
-      false,
-      'Разблокирован сотрудником',
-      currentUser.id,
-      currentUser.name
-    );
-    setTick((t) => t + 1);
+  const handleUnblock = async () => {
+    await supabaseService.setUserBlocked(targetUser.id, false);
+    await loadUserData();
     showToast(`Профиль @${targetUser.username} разблокирован`);
     if (onUserUpdated) onUserUpdated();
   };
 
-  const handleAddNote = (e: React.FormEvent) => {
+  const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!noteInput.trim()) return;
 
-    itdDb.addUserNote({
+    const content = noteInput.trim();
+    setNoteInput('');
+
+    await supabaseService.addUserNote({
       userId: targetUser.id,
       authorId: currentUser.id,
       authorName: currentUser.name,
       authorUsername: currentUser.username,
       authorAvatarUrl: currentUser.avatar_url,
       authorAvatarEmoji: currentUser.avatar_emoji,
-      content: noteInput.trim(),
+      content,
     });
 
-    setNoteInput('');
-    setTick((t) => t + 1);
+    await loadUserData();
     showToast('Заметка добавлена');
     showAppToast('Служебная заметка', `Заметка о пользователе @${targetUser.username} сохранена в карточке`, 'info');
   };
